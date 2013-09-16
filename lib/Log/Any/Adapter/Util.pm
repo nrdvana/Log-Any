@@ -53,7 +53,10 @@ sub read_file {
 sub require_dynamic {
     my ($class) = @_;
 
-    unless ( defined( eval "require $class" ) )
+    # load the package's file unless it's already loaded
+    # (it might not even have its own file)
+    unless ( defined(
+      eval "require $class unless scalar keys \%${class}::" ) )
     {    ## no critic (ProhibitStringyEval)
         die $@;
     }
