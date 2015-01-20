@@ -81,9 +81,12 @@ sub get_logger {
     my $adapter = $class->_manager->get_adapter( $category );
 
     require_dynamic($proxy_class);
-    return $proxy_class->new(
-        %params, adapter => $adapter, category => $category,
+    my $proxy= $proxy_class->new(
+        %params, adapter => $adapter, category => $category
     );
+    $class->_manager->_track_proxy( $proxy )
+        if $proxy->isa('Log::Any::Proxy');
+    return $proxy;
 }
 
 sub _get_proxy_class {

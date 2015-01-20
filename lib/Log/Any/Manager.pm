@@ -7,6 +7,7 @@ package Log::Any::Manager;
 our $VERSION = '1.04';
 
 use Carp qw(croak);
+use Scalar::Util 'weaken';
 
 sub new {
     my $class = shift;
@@ -124,6 +125,27 @@ sub _new_entry {
     };
 }
 
+sub _track_proxy {
+    my ( $self, $proxy )= @_;
+    my $category_info = $self->{category_cache}{ $proxy->{category} };
+
+    # Proxies are tracked per-channel
+    my $tracked= ($category_info->{tracked_proxies} ||= []);
+    push @$tracked, $proxy;
+    weaken( $tracked->[-1] );
+
+    # Every 8th proxy allocated to the same channel, we check that the
+    # weak references are getting cleaned up.
+    if ( 0 == ( 7 & @$tracked ) ) {
+        @$tracked= grep { defined } @$tracked;
+        weaken( $tracked->[$_] ) for 0 .. $#$tracked;
+    }
+
+    if ($category_info->{adapter} and $category_info->{adapter}->can('connect_proxy')) {
+        $category_info->{adapter}->connect_proxy($proxy);
+    }
+}
+
 sub _reselect_matching_adapters {
     my ( $self, $pattern ) = @_;
 
@@ -136,11 +158,24 @@ sub _reselect_matching_adapters {
     {
         my $new_entry = $self->_choose_entry_for_category($category);
         if ( $new_entry ne $category_info->{entry} ) {
+            # Disconnect proxies from this adapter
+            my $proxies = $category_info->{tracked_proxies} || [];
+            for my $proxy ( grep { defined } @$proxies ) {
+                $category_info->{adapter}->disconnect_proxy($proxy)
+                    if $category_info->{adapter}->can('disconnect_proxy');
+            }
+
             my $new_adapter =
               $self->_new_adapter_for_entry( $new_entry, $category );
             %{ $category_info->{adapter} } = %$new_adapter;
             bless( $category_info->{adapter}, ref($new_adapter) );
             $category_info->{entry} = $new_entry;
+
+            # Connect proxies to the new adapter
+            for my $proxy ( grep { defined } @$proxies ) {
+                $category_info->{adapter}->connect_proxy($proxy)
+                    if $category_info->{adapter}->can('connect_proxy');
+            }
         }
     }
 }
